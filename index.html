@@ -350,6 +350,14 @@ function semilla() {
 
 let db;
 try { db = JSON.parse(localStorage.getItem(KEY)) || semilla(); } catch { db = semilla(); }
+// Cambios pedidos el 25/11/2026: se aplican una sola vez, también a datos ya guardados.
+if (!db.aj1) {
+  const sOtros = db.secciones.find((s) => s.nombre === "Otros"); if (sOtros) sOtros.nombre = "Jefes de cocina";
+  const sCal = db.secciones.find((s) => s.nombre === "Caliente");
+  const jen = db.personas.find((p) => p.nombre === "Jenny" && (!sCal || p.sec === sCal.id)); if (jen) jen.nombre = "Gabriela";
+  for (const [n, h] of [["Eilen Calderón", 24], ["Gabriela", 20], ["Siham", 20]]) { const q = db.personas.find((p) => p.nombre === n); if (q) q.horas = h; }
+  db.aj1 = true; guardar();
+}
 function guardar() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast("No se pudo guardar en este dispositivo."); } }
 
 const hoyLun = lunesDe(new Date());
