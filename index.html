@@ -765,7 +765,7 @@ const COLOR_SEC = { loza:"#BDD7EE", tortilleria:"#FFFF00", preparacion:"#BDD7EE"
 const HOJA_ESP = { DESCANSO:["DESCANSO","#FFC000"], VAC:["VAC","#92D050"], FESTIVO:["festivo","#BDD7EE"], BAJA:["BAJA","#00B0F0"] };
 // Modelo común para imagen y Excel: filas de 8 casillas {t, bg, b (negrita), i (cursiva), al}
 function tablaHoja() {
-  const fin = mas(st.lun, 6), M = (d) => sinTilde(MESES[d.getMonth()].slice(0, 4)).toUpperCase();
+  const fin = mas(st.lun, 6), M = (d) => MESES[d.getMonth()].toUpperCase();
   const filas = [];
   filas.push({ tipo: "titulo", c: [{ t: "HORARIO SEMANA", b: 1, al: "l" }, { t: `${st.lun.getDate()} de ${M(st.lun)} AL ${fin.getDate()} ${M(fin)}`, al: "l" }] });
   filas.push({ tipo: "dias", c: [{ t: "", bg: "#FFE699" }, ...DIAS.map((d) => ({ t: sinTilde(d).toUpperCase(), bg: "#FFE699" }))] });
