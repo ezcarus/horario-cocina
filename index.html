@@ -709,6 +709,8 @@ function accion(act, b) {
     case "imagen": abrirImagen(); return;
     case "cerrar": $("capa").hidden = true; return;
     case "compartir": compartir(); return;
+    case "compartir-xls": compartirArchivo(xlsBlob, nombreXls(), TIPO_XLS, descargarXls); return;
+    case "descargar-xls": descargarXls(); return;
     case "descargar": descargar(); return;
   }
   todo();
@@ -756,66 +758,155 @@ $("f-importar").addEventListener("change", async (e) => {
   catch { toast("Ese archivo no es una copia del horario."); }
 });
 
-// ── Imagen para el grupo ─────────────────────────────────────────────────────
-let imgBlob = null;
-function dibujar() {
+// ── Imagen y Excel para el grupo (con el aspecto de la hoja de siempre) ──────
+let imgBlob = null, xlsBlob = null;
+const sinTilde = (t) => t.normalize("NFD").replace(/[̀-ͯ]/g, "");
+const COLOR_SEC = { loza:"#BDD7EE", tortilleria:"#FFFF00", preparacion:"#BDD7EE", grill:"#FCE4D6", fria:"#E2EFDA", caliente:"#FCE4D6" };
+const HOJA_ESP = { DESCANSO:["DESCANSO","#FFC000"], VAC:["VAC","#92D050"], FESTIVO:["festivo","#BDD7EE"], BAJA:["BAJA","#00B0F0"] };
+// Modelo común para imagen y Excel: filas de 8 casillas {t, bg, b (negrita), i (cursiva), al}
+function tablaHoja() {
+  const fin = mas(st.lun, 6), M = (d) => sinTilde(MESES[d.getMonth()].slice(0, 4)).toUpperCase();
   const filas = [];
-  for (const s of db.secciones) { const ps = deSec(s.id); if (!ps.length) continue; filas.push({ sec: s.nombre.toUpperCase() }); ps.forEach((p) => filas.push({ p })); }
+  filas.push({ tipo: "titulo", c: [{ t: "HORARIO SEMANA", b: 1, al: "l" }, { t: `${st.lun.getDate()} de ${M(st.lun)} AL ${fin.getDate()} ${M(fin)}`, al: "l" }] });
+  filas.push({ tipo: "dias", c: [{ t: "", bg: "#FFE699" }, ...DIAS.map((d) => ({ t: sinTilde(d).toUpperCase(), bg: "#FFE699" }))] });
+  filas.push({ tipo: "fechas", c: [{ t: "", bg: "#FFE699" }, ...DIAS.map((_, d) => ({ t: String(mas(st.lun, d).getDate()), bg: "#FFE699" }))] });
+  for (const s of db.secciones) {
+    const ps = deSec(s.id); if (!ps.length) continue;
+    filas.push({ tipo: "sec", c: [{ t: s.nombre.toUpperCase(), b: 1, al: "l" }, ...Array(7).fill({ t: "" })] });
+    const bgN = COLOR_SEC[sinTilde(s.nombre).toLowerCase()] || "#FFFFFF";
+    for (const p of ps) filas.push({ tipo: "per", c: [{ t: p.nombre.toUpperCase(), bg: bgN, al: "l" }, ...DIAS.map((_, d) => {
+      const c = celda(p.id, d); if (!c || !c.t) return { t: "" };
+      if (HOJA_ESP[c.t]) return { t: HOJA_ESP[c.t][0], bg: HOJA_ESP[c.t][1] };
+      return { t: c.t + (c.p ? " " + c.p : "") };
+    })] });
+  }
   const bajas = db.personas.filter((p) => p.baja);
-  if (bajas.length) { filas.push({ sec: "BAJAS" }); bajas.forEach((p) => filas.push({ p, baja: true })); }
-  const X = 2, nomW = 230, colW = 158, gap = 4, filaH = 54, secH = 40, cabH = 104, diasH = 52, pad = 16;
-  const W = pad * 2 + nomW + 7 * (colW + gap), H = pad + cabH + diasH + filas.reduce((a, f) => a + (f.sec ? secH : filaH + gap), 0) + pad;
+  if (bajas.length) {
+    filas.push({ tipo: "banda", c: [{ t: "BAJAS", b: 1, i: 1, bg: "#D9E1F2" }] });
+    for (const p of bajas) filas.push({ tipo: "per", c: [{ t: p.nombre.toUpperCase(), bg: "#DDEBF7", al: "l" }, ...Array(7).fill({ t: "BAJA", bg: "#00B0F0" })] });
+  }
+  return filas;
+}
+function dibujar() {
+  const filas = tablaHoja(), X = 2, nomW = 250, colW = 170, rowH = 34, bandaH = 60, titH = 42, pad = 14;
+  const alto = (f) => f.tipo === "banda" ? bandaH : f.tipo === "titulo" ? titH : rowH;
+  const W = pad * 2 + nomW + 7 * colW, H = pad * 2 + filas.reduce((a, f) => a + alto(f), 0);
   const cv = document.createElement("canvas"); cv.width = W * X; cv.height = H * X;
   const g = cv.getContext("2d"); g.scale(X, X);
-  const F = (w, px) => `${w} ${px}px "Segoe UI", system-ui, Arial, sans-serif`;
-  const caja = (x, y, w, h, bg) => { g.fillStyle = bg; g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, 3) : g.rect(x, y, w, h); g.fill(); };
-  g.fillStyle = "#000"; g.fillRect(0, 0, W, H);
-  g.textBaseline = "middle";
-  g.fillStyle = "#FFC000"; g.font = F(900, 46); g.textAlign = "left";
-  if ("letterSpacing" in g) g.letterSpacing = "8px";
-  g.fillText("BAKÁN", pad + 6, pad + 34);
-  g.fillStyle = "#fff"; g.font = F(700, 22); g.textAlign = "right";
-  if ("letterSpacing" in g) g.letterSpacing = "4px";
-  g.fillText(("Cocina · " + rotulo()).toUpperCase(), W - pad - 6, pad + 40);
-  if ("letterSpacing" in g) g.letterSpacing = "0px";
-  let y = pad + cabH - 20;
-  g.textAlign = "center"; g.font = F(800, 19);
-  for (let d = 0; d < 7; d++) { const x = pad + nomW + gap + d * (colW + gap); caja(x, y, colW, diasH - gap, "#0B1150"); g.fillStyle = "#fff"; g.fillText(`${DIAS[d].toUpperCase()} ${mas(st.lun, d).getDate()}`, x + colW / 2, y + (diasH - gap) / 2); }
-  y += diasH;
+  const F = (w, px, it) => `${it ? "italic " : ""}${w} ${px}px Calibri, Carlito, "Segoe UI", Arial, sans-serif`;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, W, H); g.textBaseline = "middle"; g.strokeStyle = "#000";
+  let y = pad;
   for (const f of filas) {
-    if (f.sec) { g.fillStyle = "#FFC000"; g.textAlign = "left"; g.font = F(800, 18); if ("letterSpacing" in g) g.letterSpacing = "5px"; g.fillText(f.sec, pad + 6, y + secH / 2 + 3); if ("letterSpacing" in g) g.letterSpacing = "0px"; y += secH; continue; }
-    caja(pad, y, nomW, filaH, "#1F4D3A"); g.fillStyle = "#fff"; g.textAlign = "left"; g.font = F(700, 23); g.fillText(f.p.nombre, pad + 12, y + filaH / 2, nomW - 20);
-    for (let d = 0; d < 7; d++) {
-      const x = pad + nomW + gap + d * (colW + gap), c = f.baja ? { t: "BAJA" } : celda(f.p.id, d);
-      if (!c || !c.t) { caja(x, y, colW, filaH, "#15183a"); continue; }
-      const e = estilo(c.t); caja(x, y, colW, filaH, e.bg); g.fillStyle = e.fg; g.textAlign = "center";
-      if (c.p) { g.font = F(800, 22); g.fillText(e.ver, x + colW / 2, y + 20, colW - 10); g.font = F(800, 14); g.fillText(c.p, x + colW / 2, y + 41, colW - 10); }
-      else { g.font = F(800, 24); g.fillText(e.ver, x + colW / 2, y + filaH / 2 + 1, colW - 10); }
+    const h = alto(f);
+    if (f.tipo === "titulo") {
+      g.fillStyle = "#000"; g.textAlign = "left"; g.font = F(800, 20); g.fillText(f.c[0].t, pad + 8, y + h / 2);
+      g.font = F(600, 20); g.fillText(f.c[1].t, pad + nomW + 8, y + h / 2); y += h; continue;
     }
-    y += filaH + gap;
+    if (f.tipo === "banda") {
+      g.fillStyle = f.c[0].bg; g.fillRect(pad, y, W - pad * 2, h);
+      g.fillStyle = "#000"; g.textAlign = "center"; g.font = F(800, 30, 1); g.fillText("BAJAS", W / 2, y + h / 2);
+      g.lineWidth = 3; g.strokeRect(pad, y, W - pad * 2, h); y += h; continue;
+    }
+    f.c.forEach((c, k) => {
+      const x = k ? pad + nomW + (k - 1) * colW : pad, w = k ? colW : nomW;
+      g.fillStyle = c.bg || "#fff"; g.fillRect(x, y, w, h);
+      g.lineWidth = 1; g.strokeRect(x + .5, y + .5, w, h);
+      if (!c.t) return;
+      g.fillStyle = "#000"; g.font = F(c.b ? 800 : 500, 18, c.i);
+      if (c.al === "l") { g.textAlign = "left"; g.fillText(c.t, x + 8, y + h / 2 + 1, w - 14); }
+      else { g.textAlign = "center"; g.fillText(c.t, x + w / 2, y + h / 2 + 1, w - 10); }
+    });
+    if (f.tipo === "dias") { g.lineWidth = 4; g.beginPath(); g.moveTo(pad, y); g.lineTo(W - pad, y); g.stroke(); }
+    if (f.tipo === "fechas") { g.lineWidth = 3; g.beginPath(); g.moveTo(pad, y + h); g.lineTo(W - pad, y + h); g.stroke(); }
+    y += h;
   }
   return cv;
 }
+
+// Excel (.xlsx) hecho a mano: un zip sin comprimir con la hoja y sus colores.
+function crc32(b) {
+  let t = crc32.t;
+  if (!t) { t = crc32.t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } }
+  let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = t[(c ^ b[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zip(archivos, tipo) {
+  const enc = new TextEncoder(), partes = [], central = []; let off = 0;
+  for (const [nombre, txt] of archivos) {
+    const n = enc.encode(nombre), d = enc.encode(txt), crc = crc32(d);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint32(14, crc, true); h.setUint32(18, d.length, true); h.setUint32(22, d.length, true); h.setUint16(26, n.length, true);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true); c.setUint32(20, d.length, true); c.setUint32(24, d.length, true); c.setUint16(28, n.length, true); c.setUint32(42, off, true);
+    partes.push(h, n, d); central.push(c, n); off += 30 + n.length + d.length;
+  }
+  const tam = central.reduce((a, x) => a + x.byteLength, 0), fin = new DataView(new ArrayBuffer(22));
+  fin.setUint32(0, 0x06054b50, true); fin.setUint16(8, archivos.length, true); fin.setUint16(10, archivos.length, true); fin.setUint32(12, tam, true); fin.setUint32(16, off, true);
+  return new Blob([...partes, ...central, fin], { type: tipo });
+}
+const TIPO_XLS = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+function hacerExcel() {
+  const filas = tablaHoja(), xe = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const fills = [], xfs = [], clave = {};
+  const estiloX = (c, f) => {
+    const borde = f.tipo === "titulo" ? 0 : 1, fuente = f.tipo === "banda" ? 2 : c.b ? 1 : 0;
+    const k = [c.bg || "", fuente, borde, c.al || "c"].join("|");
+    if (clave[k] == null) {
+      let fi = 0; if (c.bg) { fi = fills.indexOf(c.bg); if (fi < 0) { fills.push(c.bg); fi = fills.length - 1; } fi += 2; }
+      xfs.push(`<xf numFmtId="0" fontId="${fuente}" fillId="${fi}" borderId="${borde}" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="${c.al === "l" ? "left" : "center"}" vertical="center"/></xf>`);
+      clave[k] = xfs.length;
+    }
+    return clave[k];
+  };
+  const L = "ABCDEFGH", merges = [];
+  const rows = filas.map((f, r) => {
+    const n = r + 1, alto = f.tipo === "banda" ? 36 : 18;
+    let celdas = f.c;
+    if (f.tipo === "banda") { celdas = [f.c[0], ...Array(7).fill({ t: "", bg: f.c[0].bg })]; merges.push(`A${n}:H${n}`); }
+    if (f.tipo === "titulo") merges.push(`B${n}:H${n}`);
+    return `<row r="${n}" ht="${alto}" customHeight="1">` + celdas.map((c, k) => `<c r="${L[k]}${n}" s="${estiloX(c, f)}"` + (c.t ? ` t="inlineStr"><is><t>${xe(c.t)}</t></is></c>` : "/>")).join("") + "</row>";
+  });
+  const X0 = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`, NS = "http://schemas.openxmlformats.org";
+  const hoja = `${X0}<worksheet xmlns="${NS}/spreadsheetml/2006/main" xmlns:r="${NS}/officeDocument/2006/relationships"><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetViews><sheetView workbookViewId="0" showGridLines="0"/></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols><col min="1" max="1" width="24" customWidth="1"/><col min="2" max="8" width="17" customWidth="1"/></cols><sheetData>${rows.join("")}</sheetData><mergeCells count="${merges.length}">${merges.map((m) => `<mergeCell ref="${m}"/>`).join("")}</mergeCells><pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="1"/></worksheet>`;
+  const rgb = (h) => "FF" + h.slice(1).toUpperCase();
+  const estilos = `${X0}<styleSheet xmlns="${NS}/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><i/><sz val="18"/><name val="Calibri"/><family val="2"/></font></fonts><fills count="${fills.length + 2}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${fills.map((c) => `<fill><patternFill patternType="solid"><fgColor rgb="${rgb(c)}"/><bgColor indexed="64"/></patternFill></fill>`).join("")}</fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color auto="1"/></left><right style="thin"><color auto="1"/></right><top style="thin"><color auto="1"/></top><bottom style="thin"><color auto="1"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length + 1}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>${xfs.join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const fin = mas(st.lun, 6), nombreHoja = sinTilde(`Semana ${st.lun.getDate()}-${fin.getDate()} ${MESES[fin.getMonth()]}`).slice(0, 31);
+  return zip([
+    ["[Content_Types].xml", `${X0}<Types xmlns="${NS}/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+    ["_rels/.rels", `${X0}<Relationships xmlns="${NS}/package/2006/relationships"><Relationship Id="rId1" Type="${NS}/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+    ["xl/workbook.xml", `${X0}<workbook xmlns="${NS}/spreadsheetml/2006/main" xmlns:r="${NS}/officeDocument/2006/relationships"><sheets><sheet name="${xe(nombreHoja)}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+    ["xl/_rels/workbook.xml.rels", `${X0}<Relationships xmlns="${NS}/package/2006/relationships"><Relationship Id="rId1" Type="${NS}/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${NS}/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+    ["xl/worksheets/sheet1.xml", hoja],
+    ["xl/styles.xml", estilos],
+  ], TIPO_XLS);
+}
+
+const sePuede = (blob, nombre, tipo) => { try { return !!(navigator.canShare && navigator.canShare({ files: [new File([blob], nombre, { type: tipo })] })); } catch { return false; } };
 async function abrirImagen() {
   const cv = dibujar();
   imgBlob = await new Promise((r) => cv.toBlob(r, "image/png"));
-  const puede = !!(navigator.canShare && navigator.canShare({ files: [new File([imgBlob], "h.png", { type: "image/png" })] }));
+  xlsBlob = hacerExcel();
+  const puede = sePuede(imgBlob, "h.png", "image/png"), puedeX = sePuede(xlsBlob, "h.xlsx", TIPO_XLS);
   const bor = totalBorrador(), faltan = activas().reduce((a, p) => a + (7 - (semana()[p.id] || []).filter((c) => c && c.t).length), 0) - bor;
   $("modal").innerHTML = `<h3>Horario ${esc(rotulo())}</h3>
-    ${bor ? `<p class="nota" style="color:var(--mal);font-weight:700;margin:0">Quedan ${bor} días en borrador sin confirmar: no salen en la imagen. Confírmalos antes de enviar.</p>` : ""}
+    ${bor ? `<p class="nota" style="color:var(--mal);font-weight:700;margin:0">Quedan ${bor} días en borrador sin confirmar: no salen en la imagen ni en el Excel. Confírmalos antes de enviar.</p>` : ""}
     ${faltan ? `<p class="nota" style="color:var(--mal);font-weight:700;margin:0">Ojo: quedan ${faltan} casillas sin turno.</p>` : ""}
     <img src="${URL.createObjectURL(imgBlob)}" alt="Horario de cocina, semana ${esc(rotulo())}">
-    <div class="fila" style="margin:0">${puede ? `<button class="acc pri" data-act="compartir">Compartir (WhatsApp…)</button>` : ""}
-    <button class="acc${puede ? "" : " pri"}" data-act="descargar">Descargar imagen</button><button class="acc" data-act="cerrar">Cerrar</button></div>
+    <div class="fila" style="margin:0">${puede ? `<button class="acc pri" data-act="compartir">Compartir imagen</button>` : ""}
+    <button class="acc${puede ? "" : " pri"}" data-act="descargar">Descargar imagen</button></div>
+    <div class="fila" style="margin:0">${puedeX ? `<button class="acc" data-act="compartir-xls">Compartir Excel</button>` : ""}
+    <button class="acc" data-act="descargar-xls">Descargar Excel</button><button class="acc" data-act="cerrar">Cerrar</button></div>
     ${puede ? "" : `<p class="nota" style="margin:0">Descárgala y mándala al grupo desde WhatsApp.</p>`}`;
   $("capa").hidden = false;
 }
-const nombreImg = () => `horario-cocina-${ymd(st.lun)}.png`;
-async function compartir() {
-  try { await navigator.share({ files: [new File([imgBlob], nombreImg(), { type: "image/png" })], title: "Horario cocina " + rotulo() }); }
-  catch (e) { if (e && e.name !== "AbortError") { toast("No se pudo compartir; se descarga."); descargar(); } }
+const nombreImg = () => `horario-cocina-${ymd(st.lun)}.png`, nombreXls = () => `horario-cocina-${ymd(st.lun)}.xlsx`;
+async function compartirArchivo(blob, nombre, tipo, bajarlo) {
+  try { await navigator.share({ files: [new File([blob], nombre, { type: tipo })], title: "Horario cocina " + rotulo() }); }
+  catch (e) { if (e && e.name !== "AbortError") { toast("No se pudo compartir; se descarga."); bajarlo(); } }
 }
+const compartir = () => compartirArchivo(imgBlob, nombreImg(), "image/png", descargar);
 function descargar() { bajar(imgBlob, nombreImg()); toast("Imagen descargada."); }
+function descargarXls() { bajar(xlsBlob, nombreXls()); toast("Excel descargado."); }
 
 todo();
 </script>
