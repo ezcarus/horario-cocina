@@ -345,7 +345,7 @@ function semilla() {
   };
   const celdas = {};
   for (const p of personas) if (sem[p.nombre]) celdas[p.id] = sem[p.nombre].map((v) => { const [t, ...r] = v.split(" "); return { t, p: r.join(" ").toUpperCase() }; });
-  return { v: 1, secciones: secs, personas, turnos, puestos: ["SART","TORT","PREP","LOZA","FRIA"], semanas: { "2026-11-23": celdas } };
+  return { v: 1, secciones: secs, personas, turnos, puestos: ["SART","TORT","PREP","LOZA","FRIA","GRILL","MANAGER","SISTEMA"], semanas: { "2026-11-23": celdas } };
 }
 
 let db;
@@ -358,6 +358,8 @@ if (!db.aj1) {
   for (const [n, h] of [["Eilen Calderón", 24], ["Gabriela", 20], ["Siham", 20]]) { const q = db.personas.find((p) => p.nombre === n); if (q) q.horas = h; }
   db.aj1 = true; guardar();
 }
+// 27/11/2026: puestos nuevos GRILL, MANAGER y SISTEMA (una sola vez).
+if (!db.aj2) { for (const x of ["GRILL", "MANAGER", "SISTEMA"]) if (!db.puestos.includes(x)) db.puestos.push(x); db.aj2 = true; guardar(); }
 function guardar() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch { toast("No se pudo guardar en este dispositivo."); } }
 
 const hoyLun = lunesDe(new Date());
@@ -481,7 +483,7 @@ function pintarHoja() {
         if (bo) { const e = estilo(bo.t); h += `<td class="c borr${sel}" data-celda="${p.id}|${d}" style="background:${e.bg};color:${e.fg}">${esc(e.ver)}${bo.p ? `<small>${esc(bo.p)}</small>` : ""}</td>`; continue; }
         if (!c || !c.t) { h += `<td class="c vacia${sel}" data-celda="${p.id}|${d}">${c ? "" : "+"}</td>`; continue; }
         const e = estilo(c.t);
-        h += `<td class="c${sel}" data-celda="${p.id}|${d}" style="background:${e.bg};color:${e.fg}">${esc(e.ver)}${c.p ? `<small>${esc(c.p)}</small>` : ""}</td>`;
+        h += `<td class="c${sel}" data-celda="${p.id}|${d}" style="background:${e.bg};color:${e.fg}">${esc(e.ver)}${c.p ? c.p.split(" ").map((x) => `<small>${esc(x)}</small>`).join("") : ""}</td>`;
       }
       h += "</tr>";
     }
@@ -532,14 +534,14 @@ function panelHorario() {
   const suyos = g ? db.turnos.filter((x) => franja(x) === g) : db.turnos, otros = g ? db.turnos.filter((x) => franja(x) !== g) : [];
   const D = ESPECIALES.DESCANSO;
   h += `<section class="bloque turnos"><h2>${DIAS[st.dia]} <i>${st.dia === 6 ? "luego pasa a la siguiente persona" : "salta al día siguiente"}</i></h2>
-    <div class="puestos"><span>Puesto</span><button class="chip${!st.puesto ? " on" : ""}" data-act="puesto" data-v="">—</button>${db.puestos.map((p) => `<button class="chip${st.puesto === p ? " on" : ""}" data-act="puesto" data-v="${esc(p)}">${esc(p)}</button>`).join("")}</div>
+    <div class="puestos"><span>Puesto</span><button class="chip${!st.puesto ? " on" : ""}" data-act="puesto" data-v="">—</button>${db.puestos.map((p) => `<button class="chip${st.puesto.split(" ").includes(p) ? " on" : ""}" data-act="puesto" data-v="${esc(p)}">${esc(p)}</button>`).join("")}</div>
     ${g ? `<p class="franja">${g === "m" ? "Mañana" : "Tarde"}</p>` : ""}
     <div class="pal"><div class="paleta">${suyos.map(boton).join("")}</div>
       <button class="t descanso" data-act="turno" data-t="DESCANSO" style="background:${D.bg};color:${D.fg}">OFF<small>Descanso</small></button></div>
     ${otros.length ? `<p class="franja">${g === "m" ? "Tarde" : "Mañana"}</p><div class="paleta otros">${otros.map(boton).join("")}</div>` : ""}
     <div class="raros">${["VAC", "FESTIVO", "SANCION"].map((k) => `<button class="t" data-act="turno" data-t="${k}" style="background:${ESPECIALES[k].bg};color:${ESPECIALES[k].fg}">${{ VAC: "Vacaciones", FESTIVO: "Festivo", SANCION: "Sanción" }[k]}</button>`).join("")}
       <button class="t borrar" data-act="turno" data-t="">Borrar</button><button class="t borrar" data-act="semvac">Semana VAC</button></div>
-    <p class="nota">El puesto (SART, TORT…) va debajo del turno y luego vuelve a «—». Grupo mañana/tarde: arriba, junto al nombre. ¿Falta un turno? Pestaña Turnos.</p></section>`;
+    <p class="nota">El puesto (SART, TORT…) va debajo del turno y luego vuelve a «—». Se pueden marcar varios a la vez (p. ej. SISTEMA y MANAGER). Grupo mañana/tarde: arriba, junto al nombre. ¿Falta un turno? Pestaña Turnos.</p></section>`;
   h += `<section class="bloque"><h2>Saltar a</h2><div class="chips">${db.secciones.filter((s) => deSec(s.id).length).map((s) => `<button class="chip${s.id === st.sec ? " on" : ""}" data-act="sec" data-id="${s.id}">${esc(s.nombre)}</button>`).join("")}</div>
     <div class="personas">${deSec(st.sec).map((p) => {
       const f = (semana()[p.id] || []), faltan = 7 - f.filter((c) => c && c.t).length, off = f.filter((c) => c && c.t === "DESCANSO").length;
@@ -653,7 +655,12 @@ function accion(act, b) {
     case "sec": st.sec = id; st.per = null; st.dia = 0; break;
     case "per": st.per = id; st.dia = 0; break;
     case "dia": st.dia = +b.dataset.d; break;
-    case "puesto": st.puesto = b.dataset.v; break;
+    case "puesto": {
+      // Se pueden marcar varios puestos el mismo día (p. ej. SISTEMA y MANAGER); «—» los quita.
+      const v = b.dataset.v, ya = st.puesto ? st.puesto.split(" ") : [];
+      st.puesto = !v ? "" : (ya.includes(v) ? ya.filter((x) => x !== v) : [...ya, v]).join(" ");
+      break;
+    }
     case "turno": {
       const d = st.dia, t = b.dataset.t;
       poner(st.per, d, t ? { t, p: ESPECIALES[t] ? "" : st.puesto } : { t: "", p: "" });
